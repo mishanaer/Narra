@@ -4,6 +4,7 @@ import type { NarraCharacter } from "./types";
 vi.mock("expo-file-system/legacy", () => ({
   documentDirectory: "file:///documents/",
   EncodingType: { Base64: "base64" },
+  getInfoAsync: vi.fn(async () => ({ exists: true })),
   makeDirectoryAsync: vi.fn(),
   writeAsStringAsync: vi.fn(),
 }));

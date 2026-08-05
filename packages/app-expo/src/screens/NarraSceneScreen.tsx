@@ -2,8 +2,8 @@ import { NativeButton } from "@/components/ui/NativeButton";
 import { Text } from "@/components/ui/Typography";
 import { CenteredEmptyState } from "@/components/ui/centered-empty-state";
 import { EmptyStateActionButton } from "@/components/ui/empty-state-action-button";
-import { NarraAudioPlayer } from "@/lib/narra/audio-player";
 import { recordTelemetry } from "@/lib/analytics/telemetry";
+import { NarraAudioPlayer } from "@/lib/narra/audio-player";
 import { reportNarraError } from "@/lib/narra/errors";
 import {
   generateSceneImage,

@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  characterCountBucket,
-  durationBucket,
-  sanitizeAnalyticsProperties,
-} from "./contract";
+import { characterCountBucket, durationBucket, sanitizeAnalyticsProperties } from "./contract";
 
 describe("analytics privacy contract", () => {
   it("drops content-shaped and event-incompatible properties", () => {

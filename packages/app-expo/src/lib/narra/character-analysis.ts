@@ -1,12 +1,9 @@
 import { narraGatewayRequest } from "@/lib/ai/narra-gateway-fetch";
-import {
-  characterCountBucket,
-  durationBucket,
-} from "@/lib/analytics/contract";
 import { recordTelemetry } from "@/lib/analytics/telemetry";
 import { useNarraStore } from "@/stores/narra-store";
 import { getChunks } from "@readany/core/db/database";
 import type { Book } from "@readany/core/types";
+import { characterCountBucket, durationBucket } from "../analytics/contract";
 import {
   normalizeCharacterAnalysisResponse,
   parseNarraStreamText,

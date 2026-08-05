@@ -1,9 +1,9 @@
 import { narraGatewayRequest } from "@/lib/ai/narra-gateway-fetch";
+import { eventBus } from "@readany/core/utils/event-bus";
 import Constants from "expo-constants";
 import * as Crypto from "expo-crypto";
 import * as FileSystem from "expo-file-system/legacy";
 import { AppState, type AppStateStatus, Platform } from "react-native";
-import { eventBus } from "@readany/core/utils/event-bus";
 import {
   ANALYTICS_SCHEMA_VERSION,
   type AnalyticsEvent,
