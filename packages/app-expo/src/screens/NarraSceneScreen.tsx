@@ -3,6 +3,7 @@ import { Text } from "@/components/ui/Typography";
 import { CenteredEmptyState } from "@/components/ui/centered-empty-state";
 import { EmptyStateActionButton } from "@/components/ui/empty-state-action-button";
 import { NarraAudioPlayer } from "@/lib/narra/audio-player";
+import { recordTelemetry } from "@/lib/analytics/telemetry";
 import { reportNarraError } from "@/lib/narra/errors";
 import {
   generateSceneImage,
@@ -141,6 +142,11 @@ export function NarraSceneScreen({ route, navigation }: Props) {
 
       const createdAt = cachedAudio?.createdAt ?? Date.now();
       setSceneAudio(bookId, { sourceKey, segments, createdAt });
+      recordTelemetry("tts_playback_started", {
+        source: "scene",
+        cache_hit: Boolean(cachedAudio?.segments?.every((segment) => segment.audioUri)),
+        origin: "user",
+      });
 
       const ensureAudio = async (index: number): Promise<string> => {
         const segment = segments[index];
