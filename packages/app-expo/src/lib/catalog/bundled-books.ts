@@ -84,6 +84,10 @@ const BUNDLED_CATALOG_ASSETS: Record<
     assetModule: require("../../../assets/catalog/thunderstorm.epub"),
     coverAssetModule: require("../../../assets/catalog/covers/thunderstorm.jpg"),
   },
+  odyssey: {
+    assetModule: require("../../../assets/catalog/odyssey.epub"),
+    coverAssetModule: require("../../../assets/catalog/covers/odyssey.jpg"),
+  },
 };
 
 export const BUNDLED_CATALOG_BOOKS: readonly BundledCatalogBook[] =

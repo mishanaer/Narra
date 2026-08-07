@@ -122,6 +122,12 @@ export const BUNDLED_CATALOG_BOOK_DEFINITIONS: readonly BundledCatalogBookDefini
     author: "Александр Островский",
     fileName: "thunderstorm.epub",
   },
+  {
+    id: "odyssey",
+    title: "Одиссея",
+    author: "Гомер",
+    fileName: "odyssey.epub",
+  },
 ] as const;
 
 export function normalizeCatalogIdentity(value: string): string {

@@ -7,7 +7,7 @@ import {
 
 describe("bundled catalog characters", () => {
   it("ships a valid character set for every catalog book", () => {
-    expect(BUNDLED_CATALOG_BOOK_DEFINITIONS).toHaveLength(17);
+    expect(BUNDLED_CATALOG_BOOK_DEFINITIONS).toHaveLength(18);
 
     for (const book of BUNDLED_CATALOG_BOOK_DEFINITIONS) {
       const characters = getBundledCatalogCharactersById(book.id);
@@ -24,10 +24,13 @@ describe("bundled catalog characters", () => {
             character.fullName.trim() &&
             character.role.trim() &&
             character.appearancePrompt.trim() &&
-            character.unlockProgress === 0,
+            character.unlockProgress >= 0 &&
+            character.unlockProgress <= 0.95,
         ),
         book.title,
       ).toBe(true);
+      // Главный герой каждой книги доступен с самого начала чтения.
+      expect(characters?.[0]?.unlockProgress, book.title).toBe(0);
     }
   });
 

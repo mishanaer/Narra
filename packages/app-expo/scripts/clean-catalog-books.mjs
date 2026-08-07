@@ -15,6 +15,8 @@
  *     ссылки на wikisource.org (текст остаётся, ссылка убирается).
  *  4. eugene-onegin (calibre-экспорт): добавляет титульную страницу, убирает
  *     артефакты печатных номеров страниц и внешние сноски на feb-web.ru.
+ *  5. Удаляет встроенные шрифты FreeSerif (WSExport кладёт ~7 МБ ttf в каждую
+ *     книгу) вместе с manifest-item и @font-face в main.css.
  *
  * Metadata (dc:title/dc:creator/описание) и обложки не трогаются.
  * Файлы глав не переименовываются. ВНИМАНИЕ: удаление страниц из начала
@@ -60,6 +62,7 @@ const BOOKS = {
   seagull: { title: "Чайка", author: "Антон Чехов" },
   "cherry-orchard": { title: "Вишнёвый сад", author: "Антон Чехов" },
   thunderstorm: { title: "Гроза", author: "Александр Островский" },
+  odyssey: { title: "Одиссея", author: "Гомер", subtitle: "перевод В. А. Жуковского" },
 };
 
 /** Страницы, которые надо удалить из начала независимо от эвристики:
@@ -207,8 +210,11 @@ function junkMeasureText(html) {
   return stripTags(bodyOf(x));
 }
 
-function titlePageHtml(title, author, cssHref) {
+function titlePageHtml(title, author, subtitle, cssHref) {
   const css = cssHref ? `\n    <link type="text/css" rel="stylesheet" href="${cssHref}" />` : "";
+  const subtitleLine = subtitle
+    ? `\n      <p style="font-size: 0.85em; margin: 0.9em 0 0 0; opacity: 0.55;">${subtitle}</p>`
+    : "";
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="ru" dir="ltr">
@@ -218,7 +224,7 @@ function titlePageHtml(title, author, cssHref) {
   <body style="margin: 0; padding: 0; text-align: center; text-indent: 0;">
     <div style="padding: 38% 8% 0 8%;">
       <h1 style="font-size: 1.9em; font-weight: 600; line-height: 1.25; margin: 0 0 0.75em 0; letter-spacing: 0.01em;">${title}</h1>
-      <p style="font-size: 1.05em; margin: 0; opacity: 0.75;">${author}</p>
+      <p style="font-size: 1.05em; margin: 0; opacity: 0.75;">${author}</p>${subtitleLine}
     </div>
   </body>
 </html>
@@ -246,7 +252,7 @@ function processWikisourceBook(bookId, workDir, report) {
   const titleHref = manifestItems.get("title");
   fs.writeFileSync(
     path.join(opsDir, titleHref),
-    titlePageHtml(meta.title, meta.author),
+    titlePageHtml(meta.title, meta.author, meta.subtitle),
     "utf8",
   );
 
@@ -404,6 +410,33 @@ function processWikisourceBook(bookId, workDir, report) {
     }
   }
 
+  // 6. Встроенные шрифты WSExport (FreeSerif, ~7 МБ) не нужны — читалка
+  //    использует собственные шрифты. Убираем файлы, manifest-item и
+  //    @font-face из main.css. Для книг без шрифтов шаг ничего не меняет.
+  const fontHrefs = [...opf.matchAll(/<item\b[^>]*href="(fonts\/[^"]+)"[^>]*\/>/g)].map(
+    (m) => m[1],
+  );
+  if (fontHrefs.length > 0) {
+    for (const href of fontHrefs) {
+      fs.rmSync(path.join(opsDir, href), { force: true });
+      manifestItems.delete([...manifestItems].find(([, h]) => h === href)?.[0]);
+    }
+    opf = opf.replace(/<item\b[^>]*href="fonts\/[^"]+"[^>]*\/>\s*/g, "");
+    const fontsDir = path.join(opsDir, "fonts");
+    if (fs.existsSync(fontsDir) && fs.readdirSync(fontsDir).length === 0) {
+      fs.rmdirSync(fontsDir);
+    }
+    const cssPath = path.join(opsDir, "main.css");
+    if (fs.existsSync(cssPath)) {
+      const css = fs
+        .readFileSync(cssPath, "utf8")
+        .replace(/@font-face\s*\{[^}]*url\("fonts\/[^}]*\}\s*/g, "")
+        .replace(/body\s*\{\s*font-family:\s*"FreeSerif"\s*\}\s*/g, "");
+      fs.writeFileSync(cssPath, css, "utf8");
+    }
+    report.notes = `удалены встроенные шрифты: ${fontHrefs.join(", ")}`;
+  }
+
   fs.writeFileSync(opfPath, opf, "utf8");
   report.removed = removed;
   report.spineAfter = uniqueSpine.filter((id) => !removed.some((r) => r.id === id));
@@ -420,7 +453,7 @@ function processCalibreBook(bookId, workDir, report) {
   // титульная страница (повторный запуск не добавляет дубликат)
   fs.writeFileSync(
     path.join(workDir, "titlepage.xhtml"),
-    titlePageHtml(meta.title, meta.author),
+    titlePageHtml(meta.title, meta.author, meta.subtitle),
     "utf8",
   );
   if (!opf.includes('id="titlepage"')) {

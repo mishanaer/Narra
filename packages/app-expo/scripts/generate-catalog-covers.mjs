@@ -193,6 +193,16 @@ const books = [
     scene:
       "A young woman in mid-19th-century merchant-town dress stands above the Volga as a thunderstorm gathers, with dark wooden houses, wind-bent trees, and charged light expressing confinement and resolve.",
   },
+  {
+    id: "odyssey",
+    title: "Одиссея",
+    author: "Гомер",
+    metaphor: "малая тёмная ладья-дуга, пересекающая огромное поле винно-тёмного моря",
+    color1: "глубокий эгейский синий",
+    color2: "терракотовый охристый",
+    scene:
+      "A lone archaic Greek oared ship crosses an immense wine-dark sea toward a single distant point of light, expressing a ten-year homeward voyage of cunning and endurance.",
+  },
 ];
 
 function parseEnv(source) {
