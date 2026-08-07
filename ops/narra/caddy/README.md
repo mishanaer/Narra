@@ -1,9 +1,21 @@
 # Narra production hostname
 
-`narra.multitool.works.caddy` reserves the production hostname and lets Caddy
-obtain a public TLS certificate before the Narra v2 gateway is cut over.
+**Cutover done on 7 August 2026.** `narra.multitool.works` now proxies to the
+production gateway at `127.0.0.1:8788` on i167; `narra.multitool.works.caddy`
+in this directory is the live fragment. LLM transport was switched to HTTPS
+(`https://lm.multitool.works`) before the cutover, and
+`api.narra.disrupt.builders` keeps working as an alias for already released
+clients. The pre-cutover backups on i167 are
+`/etc/caddy/Caddyfile.before-narra-cutover-20260807T122530Z` and
+`/etc/caddy/narra.multitool.works.caddy.before-narra-cutover-20260807T122530Z`.
 
-The placeholder is intentionally fail-closed:
+The sections below document the original fail-closed placeholder and the
+reviewed change procedure. The procedure (backup, compare-and-swap, validate,
+reload, probe, rollback) still applies to any future edit of this hostname;
+only the expected probe responses differ now (`/health` returns the gateway's
+`200` JSON instead of the placeholder `503`).
+
+The placeholder was intentionally fail-closed:
 
 - it does not proxy to the legacy Railway service or to staging;
 - `/health` returns an exact JSON `503 not_ready`;
