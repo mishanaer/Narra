@@ -399,6 +399,7 @@ function ReaderContent({ route, navigation }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showControls, setShowControls] = useState(true);
+  const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
   const [showTOC, setShowTOC] = useState(false);
   const [tocActiveTab, setTocActiveTab] = useState<ReaderNavTab>("toc");
   const [showSettings, setShowSettings] = useState(false);
@@ -757,7 +758,9 @@ function ReaderContent({ route, navigation }: Props) {
 
   useLayoutEffect(() => {
     navigation.setOptions({
-      headerShown: showControls,
+      // Меню действий живёт внутри шапки: пока оно открыто, шапку скрывать
+      // нельзя, иначе меню размонтируется вместе с ней.
+      headerShown: showControls || actionsMenuOpen,
       headerTransparent: true,
       headerShadowVisible: false,
       headerBackButtonDisplayMode: "minimal",
@@ -765,7 +768,7 @@ function ReaderContent({ route, navigation }: Props) {
       headerTitleAlign: "center",
       title: "",
     });
-  }, [colors.foreground, navigation, showControls]);
+  }, [actionsMenuOpen, colors.foreground, navigation, showControls]);
 
   const suppressProgressTracking = useCallback((duration = PROGRAMMATIC_NAV_GUARD_MS) => {
     progressTrackingGuardUntilRef.current = Math.max(
@@ -1533,7 +1536,9 @@ function ReaderContent({ route, navigation }: Props) {
   }, [bookId, navigation]);
 
   useLayoutEffect(() => {
-    const headerVisible = showControls;
+    // Пока открыто меню действий, шапку прятать нельзя: headerRight с ней
+    // размонтируется, а вместе с ним исчезает и само меню — оно живёт внутри.
+    const headerVisible = showControls || actionsMenuOpen;
     // Единая панель (оглавление/закладки/поиск) + Aa-настройки — один вход с тулбара
     const openNavPanel = (tab: ReaderNavTab) => {
       setTocActiveTab(tab);
@@ -1628,6 +1633,7 @@ function ReaderContent({ route, navigation }: Props) {
                     />
                     <NativeContextMenuButton
                       accessibilityLabel="Действия с книгой"
+                      onOpenChange={setActionsMenuOpen}
                       items={[
                         ...readerActions,
                         {
@@ -1643,6 +1649,7 @@ function ReaderContent({ route, navigation }: Props) {
           },
     );
   }, [
+    actionsMenuOpen,
     bookId,
     handleOpenCharacters,
     handleToggleBookmark,

@@ -1,7 +1,7 @@
 import { BookOpenIcon, MoreVerticalIcon, ShareIcon } from "@/components/ui/Icon";
 import { Text } from "@/components/ui/Typography";
 import { fontSize, fontWeight, radius, useColors } from "@/styles/theme";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal, Pressable, TouchableOpacity } from "react-native";
 import type { NativeContextMenuButtonProps } from "./NativeContextMenuButton.types";
@@ -19,6 +19,7 @@ export function NativeContextMenuButton({
   sfSymbol = "ellipsis",
   size = 40,
   color,
+  onOpenChange,
 }: NativeContextMenuButtonProps) {
   const colors = useColors();
   const { t } = useTranslation();
@@ -26,8 +27,16 @@ export function NativeContextMenuButton({
   const iconColor = color ?? colors.foreground;
   const availableItems = items.filter((item) => !item.disabled);
 
+  const setOpenState = useCallback(
+    (next: boolean) => {
+      setOpen(next);
+      onOpenChange?.(next);
+    },
+    [onOpenChange],
+  );
+
   const runItem = (onPress: () => void) => {
-    setOpen(false);
+    setOpenState(false);
     onPress();
   };
 
@@ -38,7 +47,7 @@ export function NativeContextMenuButton({
         accessibilityLabel={accessibilityLabel}
         style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}
         activeOpacity={0.7}
-        onPress={() => setOpen(true)}
+        onPress={() => setOpenState(true)}
       >
         {sfSymbol.startsWith("book") ? (
           <BookOpenIcon size={18} color={iconColor} />
@@ -49,12 +58,17 @@ export function NativeContextMenuButton({
         )}
       </TouchableOpacity>
 
-      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+      <Modal
+        visible={open}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setOpenState(false)}
+      >
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t("common.close", "Закрыть")}
           style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" }}
-          onPress={() => setOpen(false)}
+          onPress={() => setOpenState(false)}
         >
           {/* Тап по самому листу не должен закрывать меню. */}
           <Pressable
@@ -101,7 +115,7 @@ export function NativeContextMenuButton({
               accessibilityRole="button"
               activeOpacity={0.7}
               style={{ paddingVertical: 14, paddingHorizontal: 20 }}
-              onPress={() => setOpen(false)}
+              onPress={() => setOpenState(false)}
             >
               <Text style={{ fontSize: fontSize.base, color: colors.mutedForeground }}>
                 {t("common.cancel", "Отмена")}
