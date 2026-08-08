@@ -2396,6 +2396,14 @@ html, body {
   background-color: ${bg} !important;
   color: ${fg} !important;
 }
+/* Книга может красить свои контейнеры (обычно в белый) — тогда при смене темы
+   вокруг текста остаются светлые поля. Гасим фон структурных блоков, чтобы
+   проступал фон темы. Подсветки (mark, code, pre) намеренно не трогаем. */
+body div, body section, body article, body main, body header, body footer,
+body aside, body nav, body p, body blockquote, body li, body figure,
+body table, body tbody, body thead, body tr, body td, body th {
+  background-color: transparent !important;
+}
 p, div, span, blockquote, li, dd, dt, h1, h2, h3, h4, h5, h6, td, th, caption, figcaption, label, a {
   color: inherit !important;
 }
