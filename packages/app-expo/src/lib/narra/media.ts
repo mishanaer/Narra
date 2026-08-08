@@ -1,18 +1,16 @@
 import { narraGatewayRequest } from "@/lib/ai/narra-gateway-fetch";
-import { generateOpenRouterImage } from "@/lib/ai/openrouter-image";
+import { OPENROUTER_PRIMARY_IMAGE_MODEL, generateOpenRouterImage } from "@/lib/ai/openrouter-image";
 import { recordTelemetry } from "@/lib/analytics/telemetry";
 import * as FileSystem from "expo-file-system/legacy";
-import coverGenerationConfig from "../book/cover-generation-config.json";
 import { budgetPrompt } from "./art-style";
 import { normalizeNarraError } from "./errors";
-import { mentionedCharacters, passportDescription } from "./scene-prompt";
+import { passportDescription } from "./scene-prompt";
 import { applyActiveStressMarkup } from "./stress-markup";
 import type { NarraCharacter } from "./types";
 import type { NarraProsody } from "./voice-rules";
 
 const MEDIA_DIR = `${FileSystem.documentDirectory}narra-media`;
 const MEDIA_PATH_MARKER = "/Documents/narra-media/";
-const OPENROUTER_IMAGE_MODEL = coverGenerationConfig.openRouterModel;
 let speechFileSequence = 0;
 const portraitRequests = new Map<string, Promise<string>>();
 
@@ -20,10 +18,10 @@ type MediaJobType = "image" | "cover" | "tts" | "avatar" | "video";
 type MediaJobOrigin = "user" | "background";
 
 const MEDIA_JOB_ROUTES: Record<MediaJobType, { provider: string; model: string }> = {
-  image: { provider: "kandinsky", model: "k6-image-t2i" },
-  cover: { provider: "openrouter", model: "gpt-image-2" },
+  image: { provider: "openrouter", model: OPENROUTER_PRIMARY_IMAGE_MODEL },
+  cover: { provider: "openrouter", model: OPENROUTER_PRIMARY_IMAGE_MODEL },
   tts: { provider: "salutespeech", model: "salutespeech-yourvoice" },
-  avatar: { provider: "openrouter", model: "gpt-image-2" },
+  avatar: { provider: "openrouter", model: OPENROUTER_PRIMARY_IMAGE_MODEL },
   video: { provider: "openrouter", model: "veo-3.1-lite" },
 };
 
@@ -44,9 +42,8 @@ function firstAudioLatencyBucket(durationMs: number): string {
 }
 
 /**
- * Единая телеметрия медиа-генераций. По умолчанию provider/model гейтвейные
- * (Kandinsky/SaluteSpeech); OpenRouter-путь сцен (scene-image-openrouter.ts)
- * передаёт свои через meta, сами события и поля не меняются.
+ * Единая телеметрия медиа-генераций. Статичные изображения идут через
+ * OpenRouter, речь — через SaluteSpeech; события и поля не меняются.
  */
 export async function trackNarraMediaJob<T>(
   jobType: MediaJobType,
@@ -146,117 +143,6 @@ export function portraitPrompt(character: NarraCharacter, bookContext?: string):
   ]);
 }
 
-function imagePayload(payload: unknown): { base64?: string; url?: string; error?: string } {
-  if (!payload || typeof payload !== "object") return {};
-  const value = payload as {
-    image?: string;
-    b64_json?: string;
-    url?: string;
-    error?: string;
-    data?: Array<{ b64_json?: string; url?: string }>;
-  };
-  const image = value.image;
-  if (image?.startsWith("http://") || image?.startsWith("https://")) return { url: image };
-  return {
-    base64:
-      image?.replace(/^data:image\/[^;]+;base64,/, "") ||
-      value.b64_json ||
-      value.data?.[0]?.b64_json,
-    url: value.url || value.data?.[0]?.url,
-    error: value.error,
-  };
-}
-
-// passportDescription/mentionedCharacters переехали в scene-prompt.ts (P16) —
-// единый источник для гейтвей- и OpenRouter-промптов.
-
-const KANDINSKY_SAFETY_REJECTION =
-  /политик[А-Яа-яЁё]* безопасности|safety|content policy|moderation/iu;
-
-function neutralizeSensitiveSceneText(excerpt: string): string {
-  const narration = excerpt
-    .split(/\n+/)
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith("—"))
-    .join(" ");
-  const visualSource = narration.length >= 120 ? narration : excerpt;
-  return visualSource
-    .replace(/восстани[А-Яа-яЁё]*/giu, "собрание")
-    .replace(/борьб[А-Яа-яЁё]*/giu, "настойчивые усилия")
-    .replace(/перебьют/giu, "остановят")
-    .replace(/командующ[А-Яа-яЁё]*/giu, "руководитель")
-    .replace(/подпольн[А-Яа-яЁё]*/giu, "закрытого")
-    .replace(/революц[А-Яа-яЁё]*/giu, "общественного")
-    .replace(/политич[А-Яа-яЁё]*/giu, "общественного")
-    .replace(/убий[А-Яа-яЁё]*/giu, "конфликт")
-    .replace(/убил[А-Яа-яЁё]*/giu, "остановил")
-    .replace(/оруж[А-Яа-яЁё]*/giu, "предметы")
-    .replace(/выстрел[А-Яа-яЁё]*/giu, "резкие звуки")
-    .replace(/кров[А-Яа-яЁё]*/giu, "следы")
-    .replace(/террор[А-Яа-яЁё]*/giu, "опасность")
-    .replace(/насили[А-Яа-яЁё]*/giu, "конфликт")
-    .replace(/кулак/giu, "руку")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-export function buildSceneImagePrompt(
-  chapter: string,
-  excerpt: string,
-  characters: NarraCharacter[],
-): string {
-  const canon = mentionedCharacters(excerpt, characters)
-    .map((character) => `${character.fullName}: ${passportDescription(character)}`)
-    .join("; ");
-  return budgetPrompt([
-    `Иллюстрация сцены из главы «${chapter}».`,
-    canon
-      ? `В кадре только эти герои, внешность соблюдать точно: ${canon}. Одежда из сцены важнее паспортной.`
-      : "",
-    `Сцена: ${excerpt}`,
-    "Широкая общая композиция в едином пространстве, НЕ коллаж. Не добавляй отсутствующих героев.",
-  ]);
-}
-
-export function buildSafetyFallbackSceneImagePrompt(
-  excerpt: string,
-  characters: NarraCharacter[],
-): string {
-  const canon = mentionedCharacters(excerpt, characters)
-    .map((character) => `${character.fullName}: ${passportDescription(character)}`)
-    .join("; ");
-  return budgetPrompt([
-    "Нейтральная книжная иллюстрация спокойного момента.",
-    canon ? `В кадре только эти герои, внешность соблюдать точно: ${canon}.` : "",
-    `Сцена: ${neutralizeSensitiveSceneText(excerpt)}`,
-    "Покажи окружение, свет и одежду персонажей. Без символики. Не добавляй отсутствующих героев и лишних людей.",
-  ]);
-}
-
-function isKandinskySafetyRejection(error?: string): boolean {
-  return !!error && KANDINSKY_SAFETY_REJECTION.test(error);
-}
-
-async function requestSceneImage(prompt: string): Promise<{
-  response: Response;
-  payload: { base64?: string; url?: string; error?: string };
-}> {
-  const response = await narraGatewayRequest("/v2/media/images", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      prompt,
-      width: 1024,
-      height: 1024,
-      engine: "kandinsky",
-    }),
-  });
-  return {
-    response,
-    payload: imagePayload(await response.json().catch(() => null)),
-  };
-}
-
 async function persistGeneratedImage(
   path: string,
   payload: { base64?: string; url?: string },
@@ -288,13 +174,12 @@ export async function narraMediaTargetPath(key: string, extension: string): Prom
 
 /**
  * Сохраняет base64-картинку сцены в narra-media и возвращает file://-путь.
- * Используется OpenRouter-путём (scene-image-openrouter.ts); именование файла
- * то же, что у гейтвей-сцен, чтобы restore/normalize работали одинаково.
+ * Используется OpenRouter-путём (scene-image-openrouter.ts).
  */
 export async function persistSceneImageBase64(
   bookId: string,
   base64: string,
-  extension: "png" | "jpg" = "jpg",
+  extension: "png" | "jpg" | "webp" | "gif" = "jpg",
 ): Promise<string> {
   await ensureMediaDir();
   const path = `${MEDIA_DIR}/${safeKey(`${bookId}-scene-${Date.now()}`)}.${extension}`;
@@ -306,7 +191,6 @@ async function generateCharacterPortraitRequest(
   character: NarraCharacter,
 ): Promise<string> {
   const image = await generateOpenRouterImage({
-    model: OPENROUTER_IMAGE_MODEL,
     prompt: portraitPrompt(character, bookContextDescription(bookId)),
     aspectRatio: "3:4",
     quality: "high",
@@ -346,39 +230,6 @@ export function ensureCharacterPortrait(
   return request;
 }
 
-async function generateSceneImageRequest(
-  bookId: string,
-  chapter: string,
-  excerpt: string,
-  characters: NarraCharacter[],
-): Promise<string> {
-  let { response, payload } = await requestSceneImage(
-    buildSceneImagePrompt(chapter, excerpt, characters),
-  );
-  if (!response.ok && isKandinskySafetyRejection(payload.error)) {
-    ({ response, payload } = await requestSceneImage(
-      buildSafetyFallbackSceneImagePrompt(excerpt, characters),
-    ));
-  }
-  if (!response.ok || (!payload.base64 && !payload.url)) {
-    throw new Error(payload.error || `Scene generation failed (${response.status})`);
-  }
-  await ensureMediaDir();
-  const path = `${MEDIA_DIR}/${safeKey(`${bookId}-scene-${Date.now()}`)}.png`;
-  return persistGeneratedImage(path, payload);
-}
-
-export function generateSceneImage(
-  bookId: string,
-  chapter: string,
-  excerpt: string,
-  characters: NarraCharacter[],
-): Promise<string> {
-  return trackNarraMediaJob("image", "user", () =>
-    generateSceneImageRequest(bookId, chapter, excerpt, characters),
-  );
-}
-
 export interface GeneratedCoverImage {
   base64: string;
   mimeType: string;
@@ -386,7 +237,6 @@ export interface GeneratedCoverImage {
 
 async function generateBookCoverImageRequest(prompt: string): Promise<GeneratedCoverImage> {
   const image = await generateOpenRouterImage({
-    model: OPENROUTER_IMAGE_MODEL,
     prompt,
     aspectRatio: "2:3",
     quality: "high",

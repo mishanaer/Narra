@@ -64,10 +64,7 @@ export function coverPrompt(input: {
   );
 }
 
-/**
- * Генерация обложки через Narra gateway (/v2/media/cover, installation auth).
- * Клиент отправляет только промпт: ключи, модель и фолбэк живут на сервере.
- */
+/** Генерация обложки через общий OpenRouter Images-клиент. */
 export async function generateBookCover(input: {
   title: string;
   author?: string;

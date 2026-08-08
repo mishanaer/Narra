@@ -11,7 +11,10 @@ vi.mock("expo-file-system/legacy", () => ({
   moveAsync: vi.fn(),
 }));
 vi.mock("@/lib/ai/narra-gateway-fetch", () => ({ narraGatewayRequest: vi.fn() }));
-vi.mock("@/lib/ai/openrouter-image", () => ({ generateOpenRouterImage: vi.fn() }));
+vi.mock("@/lib/ai/openrouter-image", () => ({
+  OPENROUTER_PRIMARY_IMAGE_MODEL: "openai/gpt-image-2",
+  generateOpenRouterImage: vi.fn(),
+}));
 vi.mock("@/lib/analytics/telemetry", () => ({ recordTelemetry: vi.fn() }));
 vi.mock("@/stores", () => ({
   useLibraryStore: { getState: () => ({ books: [] }) },
@@ -23,11 +26,8 @@ import { recordTelemetry } from "@/lib/analytics/telemetry";
 import { ART_STYLE, PROMPT_CHAR_LIMIT } from "./art-style";
 import {
   buildNarraSpeechSsml,
-  buildSafetyFallbackSceneImagePrompt,
-  buildSceneImagePrompt,
   generateBookCoverImage,
   generateCharacterPortrait,
-  generateSceneImage,
   normalizePersistedNarraMediaUri,
   portraitPrompt,
   synthesizeNarraSpeech,
@@ -118,105 +118,12 @@ describe("portrait prompt", () => {
       "book-1-anna-portrait.png",
     );
     expect(generateOpenRouterImage).toHaveBeenCalledWith({
-      model: "openai/gpt-image-2",
       prompt: expect.stringContaining("Анна Каренина"),
       aspectRatio: "3:4",
       quality: "high",
       outputFormat: "png",
     });
     expect(narraGatewayRequest).not.toHaveBeenCalled();
-  });
-});
-
-describe("scene image prompt", () => {
-  it("fits the Kandinsky budget with the full style on a long excerpt", () => {
-    const excerpt = `Анна вошла в зал. ${"Свет свечей дрожал на паркете, гости расступались. ".repeat(60)}`;
-    const prompt = buildSceneImagePrompt("Бал", excerpt, [anna, vronsky]);
-
-    expect(prompt.length).toBeLessThanOrEqual(PROMPT_CHAR_LIMIT);
-    expect(prompt).toContain(ART_STYLE);
-    expect(prompt.endsWith(`Стиль: ${ART_STYLE}.`)).toBe(true);
-    expect(prompt).toContain("Анна Каренина");
-  });
-
-  it("adds passport canon only for characters mentioned in the excerpt", () => {
-    const prompt = buildSceneImagePrompt("Бал", "Анна вошла в зал и остановилась у двери.", [
-      anna,
-      vronsky,
-    ]);
-
-    expect(prompt).toContain("Анна Каренина");
-    expect(prompt).toContain("тёмные волосы");
-    expect(prompt).not.toContain("Алексей Вронский");
-    expect(prompt).toContain("Не добавляй отсутствующих героев");
-  });
-
-  it("routes square scene illustrations through Kandinsky", async () => {
-    vi.mocked(narraGatewayRequest).mockResolvedValueOnce(
-      new Response(JSON.stringify({ error: "stop after request inspection" }), {
-        status: 500,
-        headers: { "content-type": "application/json" },
-      }),
-    );
-
-    await expect(generateSceneImage("book-1", "Бал", "Анна вошла в зал.", [anna])).rejects.toThrow(
-      "stop after request inspection",
-    );
-
-    const [, request] = vi.mocked(narraGatewayRequest).mock.calls[0] ?? [];
-    expect(JSON.parse(String(request?.body))).toMatchObject({
-      width: 1024,
-      height: 1024,
-      engine: "kandinsky",
-    });
-  });
-
-  it("retries a safety rejection with a neutral visual prompt", async () => {
-    vi.mocked(narraGatewayRequest)
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            error: "Kandinsky: запрос или результат отклонён политикой безопасности",
-          }),
-          { status: 422, headers: { "content-type": "application/json" } },
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ error: "fallback inspected" }), {
-          status: 500,
-          headers: { "content-type": "application/json" },
-        }),
-      );
-
-    const excerpt = [
-      "— Мы должны продолжать борьбу!",
-      "— Восстание откроет миру глаза.",
-      "Ван поднял глаза. Мир стал черно-белым, и в зал вошла Е Вэньцзе.",
-      "Окруженная спутниками, она остановилась посередине прохода.",
-    ].join("\n");
-
-    await expect(generateSceneImage("book-1", "Отступники", excerpt, [])).rejects.toThrow(
-      "fallback inspected",
-    );
-
-    expect(narraGatewayRequest).toHaveBeenCalledTimes(2);
-    const [, fallbackRequest] = vi.mocked(narraGatewayRequest).mock.calls[1] ?? [];
-    const fallbackPrompt = JSON.parse(String(fallbackRequest?.body)).prompt as string;
-    expect(fallbackPrompt).toContain("Ван поднял глаза");
-    expect(fallbackPrompt).not.toContain("борьбу");
-    expect(fallbackPrompt).not.toContain("Восстание");
-  });
-
-  it("builds a neutral fallback from narration while keeping character canon", () => {
-    const prompt = buildSafetyFallbackSceneImagePrompt(
-      "— Поднять восстание!\nАнна вошла в зал и спокойно остановилась у двери.",
-      [anna],
-    );
-
-    expect(prompt).toContain("Анна Каренина");
-    expect(prompt).toContain("Анна вошла в зал");
-    expect(prompt).not.toContain("восстание");
-    expect(prompt).toContain("Не добавляй отсутствующих героев и лишних людей");
   });
 });
 
@@ -233,7 +140,6 @@ describe("book cover generation", () => {
     });
 
     expect(generateOpenRouterImage).toHaveBeenCalledWith({
-      model: "openai/gpt-image-2",
       prompt: "front cover artwork",
       aspectRatio: "2:3",
       quality: "high",
@@ -246,7 +152,7 @@ describe("book cover generation", () => {
       expect.objectContaining({
         job_type: "cover",
         provider: "openrouter",
-        model: "gpt-image-2",
+        model: "openai/gpt-image-2",
         origin: "background",
       }),
     );

@@ -27,6 +27,7 @@ import { getPlatformService } from "@readany/core/services";
 import type { Book, BookGroup, LibraryFilter, SortField, SortOrder } from "@readany/core/types";
 import { generateId } from "@readany/core/utils";
 import { create } from "zustand";
+import { CoverGenerationQueue } from "./cover-generation-queue";
 import { debouncedSave, loadFromFS } from "./persist";
 import { useVectorModelStore } from "./vector-model-store";
 
@@ -251,8 +252,7 @@ async function resolveImportedBookIdentity(params: {
 }
 
 const titleRepairAttempted = new Set<string>();
-const coverGenerationAttempted = new Set<string>();
-let coverGenerationQueue: Promise<void> = Promise.resolve();
+const coverGenerationQueue = new CoverGenerationQueue();
 
 function setCoverGenerationActive(bookId: string, active: boolean): void {
   useLibraryStore.setState((state) => ({
@@ -345,9 +345,10 @@ async function ensureGeneratedBookCover(
       meta: { ...currentBook.meta, coverUrl },
       updatedAt: Date.now(),
     });
-    console.log(`[Library] Generated Narra gateway cover for "${currentBook.meta.title}"`);
+    console.log(`[Library] Generated OpenRouter cover for "${currentBook.meta.title}"`);
   } catch (error) {
-    console.warn(`[Library] Narra gateway could not generate a cover for ${book.id}:`, error);
+    console.warn(`[Library] OpenRouter could not generate a cover for ${book.id}:`, error);
+    throw error;
   }
 }
 
@@ -355,22 +356,19 @@ function queueGeneratedBookCover(
   book: Book,
   context?: { description?: string; textSample?: string; subjects?: string[] },
 ): Promise<void> {
-  if (book.meta.coverUrl || coverGenerationAttempted.has(book.id)) return Promise.resolve();
-  coverGenerationAttempted.add(book.id);
+  if (book.meta.coverUrl || coverGenerationQueue.hasAttempted(book.id)) return Promise.resolve();
   setCoverGenerationActive(book.id, true);
 
-  const task = coverGenerationQueue
-    .then(() => ensureGeneratedBookCover(book, context))
+  return coverGenerationQueue
+    .enqueue(book.id, () => ensureGeneratedBookCover(book, context))
     .finally(() => setCoverGenerationActive(book.id, false));
-  coverGenerationQueue = task.catch(() => undefined);
-  return task;
 }
 
 async function repairMissingBookCovers(books: Book[]): Promise<void> {
   for (const originalBook of books) {
     const book =
       useLibraryStore.getState().books.find((item) => item.id === originalBook.id) || originalBook;
-    if (book.meta.coverUrl || coverGenerationAttempted.has(book.id)) continue;
+    if (book.meta.coverUrl || coverGenerationQueue.hasAttempted(book.id)) continue;
 
     let context: { description?: string; textSample?: string; subjects?: string[] } | undefined;
     if (book.format === "epub" || book.format === "fb2") {
