@@ -11,7 +11,10 @@ vi.mock("expo-file-system/legacy", () => ({
   moveAsync: vi.fn(),
 }));
 vi.mock("@/lib/ai/narra-gateway-fetch", () => ({ narraGatewayRequest: vi.fn() }));
-vi.mock("@/lib/ai/openrouter-image", () => ({ generateOpenRouterImage: vi.fn() }));
+vi.mock("@/lib/ai/openrouter-image", () => ({
+  OPENROUTER_PRIMARY_IMAGE_MODEL: "openai/gpt-image-2",
+  generateOpenRouterImage: vi.fn(),
+}));
 vi.mock("@/lib/analytics/telemetry", () => ({ recordTelemetry: vi.fn() }));
 vi.mock("@/stores", () => ({
   useLibraryStore: { getState: () => ({ books: [] }) },

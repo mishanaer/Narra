@@ -1,3 +1,4 @@
+import { CoverGenerationAttempts } from "@/lib/book/cover-generation-attempts";
 import { generateBookCover } from "@/lib/book/generate-book-cover";
 import {
   generateBookIdentityWithGemini,
@@ -251,7 +252,7 @@ async function resolveImportedBookIdentity(params: {
 }
 
 const titleRepairAttempted = new Set<string>();
-const coverGenerationAttempted = new Set<string>();
+const coverGenerationAttempts = new CoverGenerationAttempts();
 let coverGenerationQueue: Promise<void> = Promise.resolve();
 
 function setCoverGenerationActive(bookId: string, active: boolean): void {
@@ -345,9 +346,12 @@ async function ensureGeneratedBookCover(
       meta: { ...currentBook.meta, coverUrl },
       updatedAt: Date.now(),
     });
-    console.log(`[Library] Generated Narra gateway cover for "${currentBook.meta.title}"`);
+    console.log(`[Library] Generated OpenRouter cover for "${currentBook.meta.title}"`);
   } catch (error) {
-    console.warn(`[Library] Narra gateway could not generate a cover for ${book.id}:`, error);
+    // A failed GPT Image 2 + Nano Banana run must not permanently suppress
+    // future repair attempts for this book during the current app session.
+    coverGenerationAttempts.releaseAfterFailure(book.id);
+    console.warn(`[Library] OpenRouter could not generate a cover for ${book.id}:`, error);
   }
 }
 
@@ -355,8 +359,7 @@ function queueGeneratedBookCover(
   book: Book,
   context?: { description?: string; textSample?: string; subjects?: string[] },
 ): Promise<void> {
-  if (book.meta.coverUrl || coverGenerationAttempted.has(book.id)) return Promise.resolve();
-  coverGenerationAttempted.add(book.id);
+  if (book.meta.coverUrl || !coverGenerationAttempts.tryBegin(book.id)) return Promise.resolve();
   setCoverGenerationActive(book.id, true);
 
   const task = coverGenerationQueue
@@ -370,7 +373,7 @@ async function repairMissingBookCovers(books: Book[]): Promise<void> {
   for (const originalBook of books) {
     const book =
       useLibraryStore.getState().books.find((item) => item.id === originalBook.id) || originalBook;
-    if (book.meta.coverUrl || coverGenerationAttempted.has(book.id)) continue;
+    if (book.meta.coverUrl || coverGenerationAttempts.has(book.id)) continue;
 
     let context: { description?: string; textSample?: string; subjects?: string[] } | undefined;
     if (book.format === "epub" || book.format === "fb2") {

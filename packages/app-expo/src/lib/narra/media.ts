@@ -1,8 +1,7 @@
 import { narraGatewayRequest } from "@/lib/ai/narra-gateway-fetch";
-import { generateOpenRouterImage } from "@/lib/ai/openrouter-image";
+import { OPENROUTER_PRIMARY_IMAGE_MODEL, generateOpenRouterImage } from "@/lib/ai/openrouter-image";
 import { recordTelemetry } from "@/lib/analytics/telemetry";
 import * as FileSystem from "expo-file-system/legacy";
-import coverGenerationConfig from "../book/cover-generation-config.json";
 import { budgetPrompt } from "./art-style";
 import { normalizeNarraError } from "./errors";
 import { mentionedCharacters, passportDescription } from "./scene-prompt";
@@ -12,7 +11,6 @@ import type { NarraProsody } from "./voice-rules";
 
 const MEDIA_DIR = `${FileSystem.documentDirectory}narra-media`;
 const MEDIA_PATH_MARKER = "/Documents/narra-media/";
-const OPENROUTER_IMAGE_MODEL = coverGenerationConfig.openRouterModel;
 let speechFileSequence = 0;
 const portraitRequests = new Map<string, Promise<string>>();
 
@@ -306,7 +304,7 @@ async function generateCharacterPortraitRequest(
   character: NarraCharacter,
 ): Promise<string> {
   const image = await generateOpenRouterImage({
-    model: OPENROUTER_IMAGE_MODEL,
+    model: OPENROUTER_PRIMARY_IMAGE_MODEL,
     prompt: portraitPrompt(character, bookContextDescription(bookId)),
     aspectRatio: "3:4",
     quality: "high",
@@ -386,7 +384,7 @@ export interface GeneratedCoverImage {
 
 async function generateBookCoverImageRequest(prompt: string): Promise<GeneratedCoverImage> {
   const image = await generateOpenRouterImage({
-    model: OPENROUTER_IMAGE_MODEL,
+    model: OPENROUTER_PRIMARY_IMAGE_MODEL,
     prompt,
     aspectRatio: "2:3",
     quality: "high",
