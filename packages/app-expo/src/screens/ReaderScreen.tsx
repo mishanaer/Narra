@@ -2298,6 +2298,7 @@ function ReaderContent({ route, navigation }: Props) {
           searchResults={search.searchResults}
           searchResultCount={search.searchResultCount}
           isSearching={search.isSearching}
+          searchTimedOut={search.searchTimedOut}
           onClose={() => setShowTOC(false)}
           onTabChange={setTocActiveTab}
           onSelectTocItem={goToTocItem}
@@ -2308,6 +2309,7 @@ function ReaderContent({ route, navigation }: Props) {
           onDeleteBookmark={(id) => removeBookmark(id)}
           onToggleBookmark={handleToggleBookmark}
           onSearchInput={search.handleSearchInput}
+          onSubmitSearch={search.submitSearch}
           onSelectSearchResult={(cfi) => {
             // Переход к совпадению; подсветка найденного остаётся в тексте
             search.selectResult(cfi);
