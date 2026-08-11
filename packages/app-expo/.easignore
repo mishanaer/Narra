@@ -5,6 +5,16 @@
 .gitignore
 .easignore
 
+# Local secrets and machine-generated native projects. Preview builds receive
+# EXPO_PUBLIC_* values from the EAS preview environment and run CNG in cloud.
+.env
+.env.*
+!.env.example
+.expo
+ios
+android
+node_modules
+
 # Documentation
 *.md
 LICENSE
