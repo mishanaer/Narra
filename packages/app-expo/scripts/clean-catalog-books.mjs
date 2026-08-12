@@ -17,8 +17,15 @@
  *     артефакты печатных номеров страниц и внешние сноски на feb-web.ru.
  *  5. Удаляет встроенные шрифты FreeSerif (WSExport кладёт ~7 МБ ttf в каждую
  *     книгу) вместе с manifest-item и @font-face в main.css.
+ *  6. P24: полностью удаляет страницу «Об этом электронном издании»
+ *     (about.xhtml) и все следы Викитеки/Wikisource: метаданные OPF
+ *     (dc:source, dc:identifier-ссылка, contributor «Wikisource», префикс
+ *     «автор »), dtb:uid и docAuthor в NCX, комментарии в main.css,
+ *     ambox-баннеры, «примечания редактора Викитеки», utm_source-имена
+ *     картинок. После чистки распакованное дерево проверяется на 0 вхождений
+ *     «викитек»/«wikisource»/«Об этом электронном издании» и т. п.
  *
- * Metadata (dc:title/dc:creator/описание) и обложки не трогаются.
+ * Обложки не трогаются; dc:title/dc:creator сохраняются (без префикса «автор »).
  * Файлы глав не переименовываются. ВНИМАНИЕ: удаление страниц из начала
  * сдвигает индексы спайна — у существующих читателей позиция чтения (CFI)
  * может сброситься; для новых читателей это ок.
@@ -27,14 +34,26 @@
  * Зависимости: только node + системные бинари zip/unzip (macOS/linux).
  */
 
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  bodyOf,
+  cleanContentDoc,
+  deepScrubWikisourceDir,
+  escapeRe,
+  extractEpub,
+  findWikisourceTraces,
+  junkMeasureText,
+  packEpub,
+  stripTags,
+  titlePageHtml,
+} from "./lib/epub-clean-lib.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CATALOG_DIR = path.resolve(__dirname, "../assets/catalog");
+// NARRA_CATALOG_DIR — только для тестовых прогонов на копии каталога
+const CATALOG_DIR = process.env.NARRA_CATALOG_DIR || path.resolve(__dirname, "../assets/catalog");
 
 /** Название/автор для титульных страниц — синхронизировано с
  *  src/lib/catalog/bundled-book-definitions.ts */
@@ -81,157 +100,9 @@ const DEDICATION_REWRITE = {
   "twelve-chairs": /^c0_/,
 };
 
-// ---------------------------------------------------------------- утилиты
-
-function extractEpub(epubPath, destDir) {
-  execFileSync("unzip", ["-oq", epubPath, "-d", destDir]);
-}
-
-function packEpub(workDir, epubPath) {
-  const tmpOut = `${epubPath}.tmp.zip`;
-  fs.rmSync(tmpOut, { force: true });
-  // mimetype обязан идти первым и без сжатия
-  execFileSync("zip", ["-X", "-0", "-q", tmpOut, "mimetype"], { cwd: workDir });
-  execFileSync("zip", ["-X", "-9", "-r", "-q", tmpOut, ".", "-x", "mimetype"], {
-    cwd: workDir,
-  });
-  fs.renameSync(tmpOut, epubPath);
-}
-
-function stripTags(html) {
-  return html
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;|&#160;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function bodyOf(html) {
-  const m = html.match(/<body[^>]*>([\s\S]*?)<\/body>/);
-  return m ? m[1] : html;
-}
-
-/** Статистика страницы: длина текста без ссылок и количество ссылок. */
-function pageStats(html) {
-  let body = bodyOf(html);
-  // Шапка/форма поиска/интервики не считаются содержимым
-  body = removeChrome(body);
-  const anchors = body.match(/<a\b[^>]*>[\s\S]*?<\/a>/g) ?? [];
-  const linkText = anchors.map((a) => stripTags(a)).join(" ");
-  const totalText = stripTags(body);
-  return {
-    anchorCount: anchors.length,
-    totalLen: totalText.length,
-    nonLinkLen: Math.max(0, totalText.length - linkText.length),
-  };
-}
-
-/** Служебные обвязки Викитеки, не являющиеся содержимым. */
-function removeChrome(html) {
-  return (
-    html
-      // шапка headertemplate (+ хвостовой пустой span)
-      .replace(
-        /<div id="headertemplate[^"]*"[^>]*>\s*<div id="sub_nav[^"]*"\s*\/>\s*<br[^>]*\/>\s*<\/div>(\s*<span class="mw-empty-elt"[^>]*\/>)?/g,
-        "",
-      )
-      // блок «Поиск по произведению» с формой
-      .replace(
-        /<div style="text-align:center; ">(?:(?!<\/form>)[\s\S])*?<form[\s\S]*?<\/form>[\s\S]*?<\/div>\s*<\/div>\s*<\/div>\s*<\/div>/g,
-        "",
-      )
-      .replace(/<form name="searchbox"[\s\S]*?<\/form>/g, "")
-      // интервики и категории
-      .replace(/<link rel="mw:PageProp\/[^"]*"[^>]*\/>\s*/g, "")
-  );
-}
-
-/** ul/dl, состоящие только из wiki-ссылок (текстовое оглавление). */
-function removeLinkOnlyLists(html) {
-  return html.replace(/<(ul|dl)>[\s\S]*?<\/\1>/g, (list) => {
-    if (!/rel="mw:WikiLink"/.test(list)) return list;
-    const noAnchors = list.replace(/<a\b[^>]*>[\s\S]*?<\/a>/g, "");
-    const residue = stripTags(noAnchors).replace(/[\s·—–\-,.:;()\[\]0-9IVXLC]+/g, "");
-    return residue.length <= 5 ? "" : list;
-  });
-}
-
-/** Абзацы вида «Главы: I · II · III …» (набор ссылок с разделителями). */
-function removeChapterLinkParagraphs(html) {
-  return html.replace(/<p>[\s\S]*?<\/p>/g, (p) => {
-    const anchors = p.match(/<a\b[^>]*rel="mw:WikiLink"[^>]*>/g) ?? [];
-    if (anchors.length < 3) return p;
-    const residue = stripTags(p.replace(/<a\b[^>]*>[\s\S]*?<\/a>/g, "")).replace(
-      /^(Главы|Части|Действия|Явления|Том[аы]?)\s*[:.]?/u,
-      "",
-    );
-    return residue.replace(/[\s·—–\-,.:;0-9IVXLC]+/g, "").length <= 5 ? "" : p;
-  });
-}
-
-/** Внешние ссылки на wikisource → оставить только текст. */
-function unwrapWikisourceLinks(html) {
-  return html.replace(
-    /<a\b[^>]*href="https?:\/\/[a-z.]*wikisource\.org[^"]*"[^>]*>([\s\S]*?)<\/a>/g,
-    "$1",
-  );
-}
-
-/** Заголовок «Оглавление», оставшийся без списка после чистки. */
-function removeTocHeadings(html) {
-  return html.replace(/<h([1-4])[^>]*>(?:(?!<\/h\1>)[\s\S])*?<\/h\1>/g, (h) =>
-    /^(Оглавление|Содержание)$/.test(stripTags(h)) ? "" : h,
-  );
-}
-
-function cleanContentDoc(html) {
-  let out = removeChrome(html);
-  out = removeLinkOnlyLists(out);
-  out = removeChapterLinkParagraphs(out);
-  out = unwrapWikisourceLinks(out);
-  out = removeTocHeadings(out);
-  return out;
-}
-
-/** Текст страницы для оценки «служебная или контентная»: дополнительно к
- *  обычной чистке игнорируем разделы «См. также» и примечания о публикации —
- *  они не делают страницу-оглавление содержательной. */
-function junkMeasureText(html) {
-  let x = cleanContentDoc(html);
-  x = x.replace(
-    /<section[^>]*>\s*<h(\d)[^>]*>(?:(?!<\/h\1>)[\s\S])*?См\.\s*также[\s\S]*?<\/section>/g,
-    "",
-  );
-  x = x.replace(/<ol class="mw-references[\s\S]*?<\/ol>/g, "");
-  x = x.replace(/<h([1-4])[^>]*>(?:(?!<\/h\1>)[\s\S])*?<\/h\1>/g, (h) =>
-    /^Примечания\b/.test(stripTags(h)) ? "" : h,
-  );
-  return stripTags(bodyOf(x));
-}
-
-function titlePageHtml(title, author, subtitle, cssHref) {
-  const css = cssHref ? `\n    <link type="text/css" rel="stylesheet" href="${cssHref}" />` : "";
-  const subtitleLine = subtitle
-    ? `\n      <p style="font-size: 0.85em; margin: 0.9em 0 0 0; opacity: 0.55;">${subtitle}</p>`
-    : "";
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="ru" dir="ltr">
-  <head>
-    <title>${title}</title>${css}
-  </head>
-  <body style="margin: 0; padding: 0; text-align: center; text-indent: 0;">
-    <div style="padding: 38% 8% 0 8%;">
-      <h1 style="font-size: 1.9em; font-weight: 600; line-height: 1.25; margin: 0 0 0.75em 0; letter-spacing: 0.01em;">${title}</h1>
-      <p style="font-size: 1.05em; margin: 0; opacity: 0.75;">${author}</p>${subtitleLine}
-    </div>
-  </body>
-</html>
-`;
-}
-
 // ------------------------------------------------------ обработка книги
+// Общие утилиты (stripTags, cleanContentDoc, titlePageHtml и т. д.) вынесены
+// в ./lib/epub-clean-lib.mjs и используются также fetch-ru-catalog.mjs.
 
 function processWikisourceBook(bookId, workDir, report) {
   const meta = BOOKS[bookId];
@@ -491,10 +362,6 @@ function processCalibreBook(bookId, workDir, report) {
   report.notes = `добавлен titlepage.xhtml; вычищены печатные номера страниц и сноски feb-web в ${cleanedNotes.join(", ")}`;
 }
 
-function escapeRe(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 // ----------------------------------------------------------- валидация
 
 function validateBook(bookId, workDir, report) {
@@ -554,12 +421,26 @@ function main() {
     const report = {};
     try {
       extractEpub(epubPath, workDir);
-      if (fs.existsSync(path.join(workDir, "OPS"))) {
+      const isWikisource = fs.existsSync(path.join(workDir, "OPS"));
+      if (isWikisource) {
         processWikisourceBook(bookId, workDir, report);
+        // P24: полная зачистка следов Викитеки — страница «Об этом электронном
+        // издании» (about.xhtml), wikisource-метаданные OPF/NCX, комментарии в
+        // CSS, ambox-баннеры, utm_source-имена картинок. Общая логика с
+        // clean-ru-catalog.mjs (внешний RU-каталог).
+        deepScrubWikisourceDir(workDir, bookId, report, "urn:narra:");
+        const traces = findWikisourceTraces(workDir);
+        if (traces.length > 0) {
+          report.errors = (report.errors ?? []).concat(
+            traces.slice(0, 5).map((t) => `след Викитеки: ${t}`),
+          );
+        }
       } else {
         processCalibreBook(bookId, workDir, report);
       }
-      const ok = validateBook(bookId, workDir, report);
+      const traceErrors = report.errors ?? [];
+      const ok = validateBook(bookId, workDir, report) && traceErrors.length === 0;
+      report.errors = traceErrors.concat(report.errors ?? []);
       if (ok) {
         packEpub(workDir, epubPath);
       } else {
