@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  BUNDLED_CATALOG_BOOK_DEFINITIONS,
   BUNDLED_CATALOG_COVER_VERSION,
   getBundledCatalogCoverPath,
   isBundledCatalogCoverPath,
@@ -7,6 +8,10 @@ import {
 } from "./bundled-book-definitions";
 
 describe("bundled catalog cover versioning", () => {
+  it("does not ship catalog book definitions", () => {
+    expect(BUNDLED_CATALOG_BOOK_DEFINITIONS).toEqual([]);
+  });
+
   it("uses the current version in newly installed cover paths", () => {
     expect(getBundledCatalogCoverPath("anna-karenina")).toBe(
       `covers/anna-karenina-catalog-v${BUNDLED_CATALOG_COVER_VERSION}.jpg`,

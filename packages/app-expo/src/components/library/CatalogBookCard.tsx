@@ -1,18 +1,16 @@
 import { useSwipePressGuard } from "@/components/ui/swipe-press-guard";
-import { findBundledCatalogBookByTitle } from "@/lib/catalog/bundled-books";
+import { generatedCoverTextTone } from "@/lib/book/cover-text-contrast";
 import { useColors } from "@/styles/theme";
-import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Image, View } from "react-native";
 import { makeStyles } from "./book-card-styles";
 import { BookCoverTypography } from "./book-cover-typography";
 import { PerspectiveBook } from "./perspective-book";
-import { useResolvedAssetUris } from "./use-resolved-asset-uris";
 
 interface CatalogBookCardProps {
   title: string;
   author: string;
-  coverAssetModule: number;
+  coverUri?: string;
   cardWidth: number;
   isImporting: boolean;
   isInLibrary: boolean;
@@ -22,7 +20,7 @@ interface CatalogBookCardProps {
 export function CatalogBookCard({
   title,
   author,
-  coverAssetModule,
+  coverUri,
   cardWidth,
   isImporting,
   isInLibrary,
@@ -32,8 +30,6 @@ export function CatalogBookCard({
   const styles = makeStyles(colors, cardWidth);
   const { t } = useTranslation();
   const swipePressGuard = useSwipePressGuard();
-  const coverAssetModules = useMemo(() => [coverAssetModule], [coverAssetModule]);
-  const coverUri = useResolvedAssetUris(coverAssetModules).get(coverAssetModule);
 
   return (
     <PerspectiveBook
@@ -61,7 +57,7 @@ export function CatalogBookCard({
             title={title}
             author={author}
             width={cardWidth}
-            textTone={findBundledCatalogBookByTitle(title)?.coverTextTone ?? "dark"}
+            textTone={coverUri ? generatedCoverTextTone({ title, author }) : "dark"}
           />
         </View>
       }
