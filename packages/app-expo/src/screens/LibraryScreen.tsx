@@ -39,6 +39,7 @@ import {
   downloadBackendCatalogSource,
 } from "@/lib/narra/backend-catalog-source";
 import { isBackendDownloadAbort } from "@/lib/narra/backend-file-download";
+import { CatalogCoverQueue, visibleCatalogCoverBooks } from "@/lib/narra/catalog-cover-queue";
 import { CatalogImportCoordinator } from "@/lib/narra/catalog-import-coordinator";
 import { queueBookForAutoVectorize } from "@/lib/rag/auto-vectorize-book";
 import { setCallback, setExtractorRef } from "@/lib/rag/auto-vectorize-service";
@@ -57,7 +58,7 @@ import {
 } from "@/styles/theme";
 import { spacingPixels } from "@deslop/primitives";
 import { useHeaderHeight } from "@react-navigation/elements";
-import { useNavigation } from "@react-navigation/native";
+import { useIsFocused, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { getPlatformService } from "@readany/core";
 import { setFallbackContentProvider } from "@readany/core/ai";
@@ -158,6 +159,7 @@ function LibraryScreenContent() {
   const { isDark } = useTheme();
   const { t } = useTranslation();
   const nav = useNavigation<Nav>();
+  const isScreenFocused = useIsFocused();
   const nativeHeaderHeight = useHeaderHeight();
   const layout = useResponsiveLayout();
   const gridGap = layout.isTablet ? 16 : GRID_GAP;
@@ -196,6 +198,8 @@ function LibraryScreenContent() {
   const localImportInFlightRef = useRef(false);
   const librarySectionChangedRef = useRef(false);
   const catalogImportCoordinatorRef = useRef(new CatalogImportCoordinator());
+  const catalogCoverQueueRef = useRef<CatalogCoverQueue | null>(null);
+  const catalogGridRef = useRef<View>(null);
   const swipePressGuard = useSwipePressGuard();
 
   const extractorRef = useRef<ExtractorRef>(null);
@@ -499,6 +503,67 @@ function LibraryScreenContent() {
   }, [books, catalogBooks]);
 
   const showCatalog = !activeTag && !activeGroupId && !selectionMode;
+  const catalogCoverLoadingEnabled = isScreenFocused && showCatalog && librarySection === "catalog";
+
+  const rememberCatalogCover = useCallback((catalogKey: string, coverUri: string) => {
+    setCatalogBooks((current) =>
+      current.map((book) => (book.catalogKey === catalogKey ? { ...book, coverUri } : book)),
+    );
+  }, []);
+
+  const queueVisibleCatalogCovers = useCallback(() => {
+    if (!catalogCoverLoadingEnabled) return;
+    catalogGridRef.current?.measureInWindow((_x, gridTop) => {
+      catalogCoverQueueRef.current?.enqueue(
+        visibleCatalogCoverBooks({
+          books: catalogBooks,
+          gridTop,
+          viewportHeight: layout.height,
+          columnCount,
+          cardHeight: gridItemWidth * (41 / 28),
+          rowGap: gridGap,
+          overscan: layout.height * 0.5,
+        }),
+      );
+    });
+  }, [
+    catalogBooks,
+    catalogCoverLoadingEnabled,
+    columnCount,
+    gridGap,
+    gridItemWidth,
+    layout.height,
+  ]);
+
+  useEffect(() => {
+    if (!catalogCoverLoadingEnabled) {
+      catalogCoverQueueRef.current?.dispose();
+      catalogCoverQueueRef.current = null;
+      return;
+    }
+
+    const queue = new CatalogCoverQueue({
+      concurrency: 2,
+      load: materializeBackendCatalogCover,
+      onLoaded: rememberCatalogCover,
+      onError: (catalogKey, error) => {
+        if (!isBackendDownloadAbort(error)) {
+          console.warn(`[Catalog] Failed to load visible cover ${catalogKey}:`, error);
+        }
+      },
+    });
+    catalogCoverQueueRef.current = queue;
+    return () => {
+      if (catalogCoverQueueRef.current === queue) catalogCoverQueueRef.current = null;
+      queue.dispose();
+    };
+  }, [catalogCoverLoadingEnabled, rememberCatalogCover]);
+
+  useEffect(() => {
+    if (!catalogCoverLoadingEnabled) return;
+    const frame = requestAnimationFrame(queueVisibleCatalogCovers);
+    return () => cancelAnimationFrame(frame);
+  }, [catalogCoverLoadingEnabled, queueVisibleCatalogCovers]);
 
   const handleLocalImport = useCallback(async () => {
     if (localImportInFlightRef.current) return;
@@ -748,7 +813,14 @@ function LibraryScreenContent() {
       setCatalogImportingId(catalogBook.catalogKey);
       let temporarySource: string | null = null;
       try {
-        const coverPromise = materializeBackendCatalogCover(catalogBook).catch((error) => {
+        const coverPromise = (
+          catalogCoverQueueRef.current
+            ? catalogCoverQueueRef.current.load(catalogBook, true)
+            : materializeBackendCatalogCover(catalogBook).then((coverUri) => {
+                if (coverUri) rememberCatalogCover(catalogBook.catalogKey, coverUri);
+                return coverUri;
+              })
+        ).catch((error) => {
           console.warn(`[Catalog] Failed to download cover ${catalogBook.catalogKey}:`, error);
           return undefined;
         });
@@ -794,7 +866,7 @@ function LibraryScreenContent() {
         }
       }
     },
-    [catalogBooksInLibrary, handleOpen, importBooks, t, updateBook],
+    [catalogBooksInLibrary, handleOpen, importBooks, rememberCatalogCover, t, updateBook],
   );
 
   const handleManageTags = useCallback((book: Book) => {
@@ -1248,7 +1320,11 @@ function LibraryScreenContent() {
           />
         </View>
       ) : (
-        <View style={s.catalogGrid}>
+        <View
+          ref={catalogGridRef}
+          style={s.catalogGrid}
+          onLayout={() => requestAnimationFrame(queueVisibleCatalogCovers)}
+        >
           {catalogBooks.map((catalogBook) => (
             <View key={catalogBook.bookEditionId} style={s.gridItem}>
               <CatalogBookCard
@@ -1312,6 +1388,8 @@ function LibraryScreenContent() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
+          onScroll={queueVisibleCatalogCovers}
+          scrollEventThrottle={100}
         >
           {listHeader}
           {showCatalog ? libraryPager : renderLibraryGrid(gridItems)}

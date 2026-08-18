@@ -7,6 +7,7 @@ const CACHE_VERSION = 1;
 const CACHE_ROOT = `${FileSystem.documentDirectory}narra-backend-catalog`;
 const COVER_ROOT = `${CACHE_ROOT}/covers`;
 const CATALOG_PATH = `${CACHE_ROOT}/catalog.json`;
+let coverTemporarySequence = 0;
 
 export interface CachedBackendCatalogBook extends BackendCatalogBook {
   coverUri?: string;
@@ -77,6 +78,7 @@ export async function refreshBackendCatalog(): Promise<CachedBackendCatalogBook[
 
 export async function materializeBackendCatalogCover(
   book: BackendCatalogBook,
+  signal?: AbortSignal,
 ): Promise<string | undefined> {
   const path = coverPath(book);
   if (!path || !book.cover) return undefined;
@@ -85,13 +87,15 @@ export async function materializeBackendCatalogCover(
     return path;
 
   await FileSystem.deleteAsync(path, { idempotent: true });
-  const temporaryPath = `${path}.${Date.now()}.tmp`;
+  coverTemporarySequence += 1;
+  const temporaryPath = `${path}.${Date.now()}-${coverTemporarySequence}.tmp`;
   await downloadVerifiedBackendFile({
     downloadPath: book.cover.downloadPath,
     destinationPath: temporaryPath,
     expectedSha256: book.cover.contentHash,
     expectedByteSize: book.cover.byteSize,
     label: "Backend catalog cover",
+    signal,
   });
   await FileSystem.moveAsync({ from: temporaryPath, to: path });
   return path;
