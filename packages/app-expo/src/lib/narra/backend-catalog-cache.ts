@@ -1,11 +1,7 @@
 import { getPlatformService } from "@readany/core/services";
 import * as FileSystem from "expo-file-system/legacy";
-import {
-  type BackendCatalogBook,
-  fetchBackendCatalogBooks,
-  requestBackendDownloadUrl,
-} from "./backend-catalog-api";
-import { sha256BackendFile } from "./backend-file-hash";
+import { type BackendCatalogBook, fetchBackendCatalogBooks } from "./backend-catalog-api";
+import { downloadVerifiedBackendFile } from "./backend-file-download";
 
 const CACHE_VERSION = 1;
 const CACHE_ROOT = `${FileSystem.documentDirectory}narra-backend-catalog`;
@@ -90,23 +86,13 @@ export async function materializeBackendCatalogCover(
 
   await FileSystem.deleteAsync(path, { idempotent: true });
   const temporaryPath = `${path}.${Date.now()}.tmp`;
-  const url = await requestBackendDownloadUrl(book.cover.downloadPath);
-  const result = await FileSystem.createDownloadResumable(url, temporaryPath, {
-    sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
-  }).downloadAsync();
-  if (!result || result.status < 200 || result.status >= 300) {
-    await FileSystem.deleteAsync(temporaryPath, { idempotent: true });
-    throw new Error(`Backend cover download failed (${result?.status ?? "cancelled"})`);
-  }
-  const info = await FileSystem.getInfoAsync(temporaryPath);
-  if (!info.exists || info.isDirectory || info.size !== book.cover.byteSize) {
-    await FileSystem.deleteAsync(temporaryPath, { idempotent: true });
-    throw new Error("Backend cover size mismatch");
-  }
-  if ((await sha256BackendFile(temporaryPath)).toLowerCase() !== book.cover.contentHash) {
-    await FileSystem.deleteAsync(temporaryPath, { idempotent: true });
-    throw new Error("Backend cover checksum mismatch");
-  }
+  await downloadVerifiedBackendFile({
+    downloadPath: book.cover.downloadPath,
+    destinationPath: temporaryPath,
+    expectedSha256: book.cover.contentHash,
+    expectedByteSize: book.cover.byteSize,
+    label: "Backend catalog cover",
+  });
   await FileSystem.moveAsync({ from: temporaryPath, to: path });
   return path;
 }

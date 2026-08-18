@@ -1,6 +1,6 @@
 import * as FileSystem from "expo-file-system/legacy";
-import { type BackendCatalogBook, requestBackendDownloadUrl } from "./backend-catalog-api";
-import { sha256BackendFile } from "./backend-file-hash";
+import type { BackendCatalogBook } from "./backend-catalog-api";
+import { downloadVerifiedBackendFile } from "./backend-file-download";
 
 const IMPORT_CACHE_ROOT = `${FileSystem.cacheDirectory}narra-catalog-import`;
 
@@ -22,18 +22,12 @@ export async function downloadBackendCatalogSource(book: BackendCatalogBook): Pr
   )}.${safeExtension(book.format)}`;
   await FileSystem.deleteAsync(filePath, { idempotent: true });
 
-  const downloadUrl = await requestBackendDownloadUrl(book.sourceDownloadPath);
-  const result = await FileSystem.createDownloadResumable(downloadUrl, filePath, {
-    sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
-  }).downloadAsync();
-  if (!result || result.status < 200 || result.status >= 300) {
-    await FileSystem.deleteAsync(filePath, { idempotent: true });
-    throw new Error(`Backend catalog download failed (${result?.status ?? "cancelled"})`);
-  }
-  if ((await sha256BackendFile(filePath)).toLowerCase() !== book.contentSha256) {
-    await FileSystem.deleteAsync(filePath, { idempotent: true });
-    throw new Error("Backend catalog checksum mismatch");
-  }
+  await downloadVerifiedBackendFile({
+    downloadPath: book.sourceDownloadPath,
+    destinationPath: filePath,
+    expectedSha256: book.contentSha256,
+    label: "Backend catalog source",
+  });
   return filePath;
 }
 
