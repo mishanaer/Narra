@@ -12,7 +12,10 @@ function safeExtension(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "") || "epub";
 }
 
-export async function downloadBackendCatalogSource(book: BackendCatalogBook): Promise<string> {
+export async function downloadBackendCatalogSource(
+  book: BackendCatalogBook,
+  signal?: AbortSignal,
+): Promise<string> {
   const cacheInfo = await FileSystem.getInfoAsync(IMPORT_CACHE_ROOT);
   if (!cacheInfo.exists) {
     await FileSystem.makeDirectoryAsync(IMPORT_CACHE_ROOT, { intermediates: true });
@@ -27,6 +30,7 @@ export async function downloadBackendCatalogSource(book: BackendCatalogBook): Pr
     destinationPath: filePath,
     expectedSha256: book.contentSha256,
     label: "Backend catalog source",
+    signal,
   });
   return filePath;
 }

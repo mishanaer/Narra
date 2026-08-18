@@ -1,8 +1,9 @@
+import { Text } from "@/components/ui/Typography";
 import { useSwipePressGuard } from "@/components/ui/swipe-press-guard";
 import { generatedCoverTextTone } from "@/lib/book/cover-text-contrast";
 import { useColors } from "@/styles/theme";
 import { useTranslation } from "react-i18next";
-import { Image, View } from "react-native";
+import { ActivityIndicator, Image, View } from "react-native";
 import { makeStyles } from "./book-card-styles";
 import { BookCoverTypography } from "./book-cover-typography";
 import { PerspectiveBook } from "./perspective-book";
@@ -37,11 +38,12 @@ export function CatalogBookCard({
       height={cardWidth * (41 / 28)}
       accessibilityLabel={title}
       accessibilityHint={
-        isInLibrary
-          ? t("notes.openBook", "Открыть книгу")
-          : t("library.catalogAdd", "Добавить в библиотеку")
+        isImporting
+          ? t("library.catalogImportInProgressTitle", "Книга уже загружается")
+          : isInLibrary
+            ? t("notes.openBook", "Открыть книгу")
+            : t("library.catalogAdd", "Добавить в библиотеку")
       }
-      disabled={isImporting}
       onPress={() => {
         if (swipePressGuard?.canPress() === false) return;
         onPress();
@@ -59,6 +61,14 @@ export function CatalogBookCard({
             width={cardWidth}
             textTone={coverUri ? generatedCoverTextTone({ title, author }) : "dark"}
           />
+          {isImporting ? (
+            <View pointerEvents="none" style={styles.downloadingOverlay}>
+              <ActivityIndicator size="small" color="#fff" />
+              <Text style={styles.downloadingOverlayText}>
+                {t("library.catalogImporting", "Загружаем…")}
+              </Text>
+            </View>
+          ) : null}
         </View>
       }
     />

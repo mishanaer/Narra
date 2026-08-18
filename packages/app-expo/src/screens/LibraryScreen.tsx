@@ -38,6 +38,8 @@ import {
   cleanupBackendCatalogSource,
   downloadBackendCatalogSource,
 } from "@/lib/narra/backend-catalog-source";
+import { isBackendDownloadAbort } from "@/lib/narra/backend-file-download";
+import { CatalogImportCoordinator } from "@/lib/narra/catalog-import-coordinator";
 import { queueBookForAutoVectorize } from "@/lib/rag/auto-vectorize-book";
 import { setCallback, setExtractorRef } from "@/lib/rag/auto-vectorize-service";
 import type { RootStackParamList } from "@/navigation/RootNavigator";
@@ -193,6 +195,7 @@ function LibraryScreenContent() {
   const [groupNameInput, setGroupNameInput] = useState("");
   const localImportInFlightRef = useRef(false);
   const librarySectionChangedRef = useRef(false);
+  const catalogImportCoordinatorRef = useRef(new CatalogImportCoordinator());
   const swipePressGuard = useSwipePressGuard();
 
   const extractorRef = useRef<ExtractorRef>(null);
@@ -267,6 +270,11 @@ function LibraryScreenContent() {
   useEffect(() => {
     void loadBackendCatalog();
   }, [loadBackendCatalog]);
+
+  useEffect(() => {
+    const coordinator = catalogImportCoordinatorRef.current;
+    return () => coordinator.dispose();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -681,10 +689,61 @@ function LibraryScreenContent() {
     async (catalogBook: CachedBackendCatalogBook) => {
       const existingBook = catalogBooksInLibrary.get(catalogBook.catalogKey);
       if (existingBook) {
+        const coordinator = catalogImportCoordinatorRef.current;
+        if (coordinator.phase === "importing") {
+          Alert.alert(
+            t("library.catalogImportFinishingTitle", "Книга добавляется"),
+            t(
+              "library.catalogImportFinishingDescription",
+              "Дождитесь завершения импорта и попробуйте снова.",
+            ),
+          );
+          return;
+        }
+        if (coordinator.cancelDownload()) {
+          coordinator.dispose();
+          setCatalogImportingId(null);
+        }
         await handleOpen(existingBook);
         return;
       }
-      if (catalogImportingId) return;
+
+      const coordinator = catalogImportCoordinatorRef.current;
+      const beginResult = coordinator.begin(catalogBook.catalogKey);
+      if (beginResult.status === "already-active") {
+        Alert.alert(
+          t("library.catalogImportInProgressTitle", "Книга уже загружается"),
+          t(
+            "library.catalogImportInProgressDescription",
+            "Можно дождаться загрузки или выбрать другую книгу.",
+          ),
+          [
+            {
+              text: t("library.catalogCancelDownload", "Отменить загрузку"),
+              style: "destructive",
+              onPress: () => {
+                if (coordinator.cancelDownload(beginResult.operation)) {
+                  coordinator.complete(beginResult.operation);
+                  setCatalogImportingId(null);
+                }
+              },
+            },
+            { text: t("common.continue", "Продолжить") },
+          ],
+        );
+        return;
+      }
+      if (beginResult.status === "busy-importing") {
+        Alert.alert(
+          t("library.catalogImportFinishingTitle", "Книга добавляется"),
+          t(
+            "library.catalogImportFinishingDescription",
+            "Дождитесь завершения импорта и попробуйте снова.",
+          ),
+        );
+        return;
+      }
+      const { operation } = beginResult;
 
       setCatalogImportingId(catalogBook.catalogKey);
       let temporarySource: string | null = null;
@@ -693,10 +752,15 @@ function LibraryScreenContent() {
           console.warn(`[Catalog] Failed to download cover ${catalogBook.catalogKey}:`, error);
           return undefined;
         });
-        temporarySource = await downloadBackendCatalogSource(catalogBook);
+        temporarySource = await downloadBackendCatalogSource(
+          catalogBook,
+          operation.controller.signal,
+        );
+        if (!coordinator.markImporting(operation)) return;
         const result = await importBooks([
           { uri: temporarySource, name: `${catalogBook.catalogKey}.${catalogBook.format}` },
         ]);
+        if (!coordinator.isCurrent(operation)) return;
         const importedBook = result.imported[0] ?? result.skippedDuplicates[0]?.existingBook;
         if (!importedBook) throw new Error("catalog-import-failed");
 
@@ -711,21 +775,26 @@ function LibraryScreenContent() {
           coverUrl,
         };
         await updateBook(importedBook.id, { meta });
+        if (!coordinator.isCurrent(operation)) return;
         await handleOpen({ ...importedBook, meta });
       } catch (error) {
-        console.error(`[Catalog] Failed to add ${catalogBook.catalogKey}:`, error);
-        Alert.alert(
-          t("library.catalogImportErrorTitle", "Не получилось добавить книгу"),
-          t("library.catalogImportErrorDescription", "Попробуйте ещё раз."),
-        );
+        if (!isBackendDownloadAbort(error)) {
+          console.error(`[Catalog] Failed to add ${catalogBook.catalogKey}:`, error);
+          Alert.alert(
+            t("library.catalogImportErrorTitle", "Не получилось добавить книгу"),
+            t("library.catalogImportErrorDescription", "Попробуйте ещё раз."),
+          );
+        }
       } finally {
         await cleanupBackendCatalogSource(temporarySource).catch((error) => {
           console.warn("[Catalog] Failed to remove temporary source:", error);
         });
-        setCatalogImportingId(null);
+        if (coordinator.complete(operation)) {
+          setCatalogImportingId(null);
+        }
       }
     },
-    [catalogBooksInLibrary, catalogImportingId, handleOpen, importBooks, t, updateBook],
+    [catalogBooksInLibrary, handleOpen, importBooks, t, updateBook],
   );
 
   const handleManageTags = useCallback((book: Book) => {

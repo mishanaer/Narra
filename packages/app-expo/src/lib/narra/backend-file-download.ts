@@ -4,6 +4,7 @@ import { requestBackendDownloadUrl } from "./backend-catalog-api";
 import { sha256BackendFile } from "./backend-file-hash";
 
 const MAX_DOWNLOAD_ATTEMPTS = 3;
+const DOWNLOAD_ATTEMPT_TIMEOUT_MS = 135_000;
 
 interface VerifiedBackendDownload {
   downloadPath: string;
@@ -11,10 +12,37 @@ interface VerifiedBackendDownload {
   expectedSha256: string;
   expectedByteSize?: number;
   label: string;
+  signal?: AbortSignal;
+  attemptTimeoutMs?: number;
 }
 
-function retryDelay(attempt: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, attempt * 350));
+function abortError(): Error {
+  const error = new Error("Backend file download was cancelled");
+  error.name = "AbortError";
+  return error;
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw abortError();
+}
+
+function retryDelay(attempt: number, signal?: AbortSignal): Promise<void> {
+  throwIfAborted(signal);
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, attempt * 350);
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(abortError());
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+export function isBackendDownloadAbort(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }
 
 async function verifyDownloadedFile({
@@ -43,16 +71,23 @@ export async function downloadVerifiedBackendFile(options: VerifiedBackendDownlo
   if (!platform.downloadFile) throw new Error("Platform file downloader is unavailable");
   let lastError: unknown;
   for (let attempt = 1; attempt <= MAX_DOWNLOAD_ATTEMPTS; attempt += 1) {
+    throwIfAborted(options.signal);
     await FileSystem.deleteAsync(options.destinationPath, { idempotent: true });
     try {
       const url = await requestBackendDownloadUrl(options.downloadPath);
-      await platform.downloadFile(url, options.destinationPath);
+      throwIfAborted(options.signal);
+      await platform.downloadFile(url, options.destinationPath, {
+        signal: options.signal,
+        timeoutMs: options.attemptTimeoutMs ?? DOWNLOAD_ATTEMPT_TIMEOUT_MS,
+      });
+      throwIfAborted(options.signal);
       await verifyDownloadedFile(options);
       return;
     } catch (error) {
       lastError = error;
       await FileSystem.deleteAsync(options.destinationPath, { idempotent: true });
-      if (attempt < MAX_DOWNLOAD_ATTEMPTS) await retryDelay(attempt);
+      if (options.signal?.aborted || isBackendDownloadAbort(error)) throw abortError();
+      if (attempt < MAX_DOWNLOAD_ATTEMPTS) await retryDelay(attempt, options.signal);
     }
   }
   const detail = lastError instanceof Error ? lastError.message : String(lastError);

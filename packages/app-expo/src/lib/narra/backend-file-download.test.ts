@@ -55,7 +55,41 @@ describe("verified backend file download", () => {
       2,
       "https://objects.example/second",
       "file:///cache/book.epub",
+      expect.objectContaining({ timeoutMs: 135_000 }),
     );
     expect(mocks.sha256BackendFile).toHaveBeenCalledWith("file:///cache/book.epub");
+  });
+
+  it("cancels the active native transfer without retrying", async () => {
+    const controller = new AbortController();
+    mocks.requestBackendDownloadUrl.mockResolvedValue("https://objects.example/hung");
+    mocks.downloadFile.mockImplementation(
+      async (_url: string, _destination: string, options: { signal?: AbortSignal }) => {
+        await new Promise<void>((_resolve, reject) => {
+          const rejectAbort = () => {
+            const error = new Error("aborted");
+            error.name = "AbortError";
+            reject(error);
+          };
+          if (options.signal?.aborted) rejectAbort();
+          else options.signal?.addEventListener("abort", rejectAbort, { once: true });
+        });
+      },
+    );
+
+    const download = downloadVerifiedBackendFile({
+      downloadPath: "/v2/books/book-1/source/download",
+      destinationPath: "file:///cache/book.epub",
+      expectedSha256: "a".repeat(64),
+      expectedByteSize: 42,
+      label: "Backend catalog source",
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(mocks.downloadFile).toHaveBeenCalledTimes(1));
+    controller.abort();
+
+    await expect(download).rejects.toMatchObject({ name: "AbortError" });
+    expect(mocks.requestBackendDownloadUrl).toHaveBeenCalledTimes(1);
+    expect(mocks.downloadFile).toHaveBeenCalledTimes(1);
   });
 });
