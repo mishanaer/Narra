@@ -3,7 +3,8 @@ import { Text } from "@/components/ui/Typography";
 import { narraGatewayRequest } from "@/lib/ai/narra-gateway-fetch";
 import { recordTelemetry } from "@/lib/analytics/telemetry";
 import { NarraAudioPlayer } from "@/lib/narra/audio-player";
-import { isCharacterUnlocked, normalizeReadingProgress } from "@/lib/narra/domain";
+import { buildCharacterSystemPrompt } from "@/lib/narra/character-prompt";
+import { isCharacterUnlocked } from "@/lib/narra/domain";
 import { reportNarraError } from "@/lib/narra/errors";
 import { synthesizeNarraSpeech } from "@/lib/narra/media";
 import type { NarraCharacter, NarraChatMessage } from "@/lib/narra/types";
@@ -20,22 +21,6 @@ import { Alert, ScrollView, StyleSheet, View } from "react-native";
 
 type Props = NativeStackScreenProps<RootStackParamList, "NarraCharacterChat">;
 
-export function buildCharacterSystemPrompt(
-  character: NarraCharacter,
-  title: string,
-  progress: number,
-  memory: string,
-): string {
-  const safeProgress = normalizeReadingProgress(progress);
-  return `Ты — ${character.fullName} из книги «${title}». Полностью оставайся в роли.
-Характер: ${character.traits.join(", ")}.
-Роль: ${character.role}.
-Манера речи: ${character.speechStyle}.
-Отвечай от первого лица, живо, обычно 1–3 предложениями. Не говори, что ты ИИ, модель или персонаж книги.
-Не используй списки и канцелярит. Реагируй на конкретные слова собеседника, можешь спорить, шутить и задавать вопросы.
-Читатель прошёл примерно ${Math.round(safeProgress * 100)}% книги. Не раскрывай события, знания, отношения и судьбы героев дальше этого прогресса. Если вопрос ведёт к спойлеру, мягко уклонись в своём характере и переведи разговор к уже известным событиям — не упоминай правила или ограничения.
-${memory ? `Твоя долговременная память о собеседнике:\n${memory}` : ""}`;
-}
 
 async function readCompletion(response: Response): Promise<string> {
   const body = await response.text();
